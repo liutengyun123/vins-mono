@@ -11,6 +11,7 @@
 #include "estimator.h"
 #include "parameters.h"
 #include "utility/visualization.h"
+#include "vins_logger.h"
 
 Estimator estimator;
 
@@ -216,8 +217,8 @@ void process() {
       double last_imu_time_in_meas =
           measurement.first.back()->header.stamp.toSec();
       double imu_img_delay = last_imu_time_in_meas - img_time;
-      ROS_INFO("[VIO] === Frame img_t=%.3f ===", img_time);
-      ROS_INFO("[VIO] IMU_count=%d | IMU_range=[%.3f, %.3f] | "
+      VINS_LOG("[VIO] === Frame img_t=%.3f ===", img_time);
+      VINS_LOG("[VIO] IMU_count=%d | IMU_range=[%.3f, %.3f] | "
                "IMU-IMG_delay=%.4fs | td=%.4f",
                imu_count, first_imu_time, last_imu_time_in_meas, imu_img_delay,
                estimator.td);
@@ -316,11 +317,18 @@ void process() {
 
       double whole_t = t_s.toc();
       // === DIAG: per-frame processing summary ===
-      ROS_INFO("[VIO] features_in_frame=%lu | process_time=%.1fms | solver=%s",
+      VINS_LOG("[VIO] features_in_frame=%lu | process_time=%.1fms | solver=%s",
                img_msg->points.size(), whole_t,
                estimator.solver_flag == Estimator::SolverFlag::NON_LINEAR
                    ? "NON_LINEAR"
                    : "INITIAL");
+      // 漂移诊断: 输出当前位置和速度
+      if (estimator.solver_flag == Estimator::SolverFlag::NON_LINEAR) {
+        VINS_LOG("[VIO] P=[%.4f, %.4f, %.4f] | V=[%.4f, %.4f, %.4f]",
+                 estimator.Ps[WINDOW_SIZE].x(), estimator.Ps[WINDOW_SIZE].y(),
+                 estimator.Ps[WINDOW_SIZE].z(), estimator.Vs[WINDOW_SIZE].x(),
+                 estimator.Vs[WINDOW_SIZE].y(), estimator.Vs[WINDOW_SIZE].z());
+      }
       printStatistics(estimator, whole_t);
       std_msgs::Header header = img_msg->header;
       header.frame_id = "world";
@@ -340,7 +348,7 @@ void process() {
     m_buf.lock();
     m_state.lock();
     // === DIAG: buffer status ===
-    ROS_INFO("[VIO] buf_status: imu_buf=%lu feature_buf=%lu", imu_buf.size(),
+    VINS_LOG("[VIO] buf_status: imu_buf=%lu feature_buf=%lu", imu_buf.size(),
              feature_buf.size());
     if (estimator.solver_flag == Estimator::SolverFlag::NON_LINEAR)
       update();
@@ -356,6 +364,9 @@ int main(int argc, char **argv) {
                                  ros::console::levels::Info);
   readParameters(n);
   estimator.setParameter();
+
+  // 初始化文件日志 → ~/catkin_vins/logs/vins_estimator_*.log
+  VinsFileLogger::instance().init("estimator");
 #ifdef EIGEN_DONT_PARALLELIZE
   ROS_DEBUG("EIGEN_DONT_PARALLELIZE");
 #endif

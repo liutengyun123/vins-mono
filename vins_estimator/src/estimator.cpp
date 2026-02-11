@@ -1,4 +1,5 @@
 #include "estimator.h"
+#include "vins_logger.h"
 
 Estimator::Estimator() : f_manager{Rs} {
   ROS_INFO("init begins");
@@ -117,7 +118,7 @@ void Estimator::processImage(
     marginalization_flag = MARGIN_SECOND_NEW;
 
   // === DIAG: keyframe decision and feature stats ===
-  ROS_INFO(
+  VINS_LOG(
       "[EST] frame_count=%d | %s | features_in_manager=%d | last_track_num=%d",
       frame_count,
       marginalization_flag == MARGIN_OLD ? "KEYFRAME (margin_old)"
@@ -167,7 +168,7 @@ void Estimator::processImage(
         solveOdometry();
         slideWindow();
         f_manager.removeFailures();
-        ROS_INFO("Initialization finish!");
+        VINS_LOG("[EST] *** Initialization finish! ***");
         last_R = Rs[WINDOW_SIZE];
         last_P = Ps[WINDOW_SIZE];
         last_R0 = Rs[0];
@@ -181,14 +182,14 @@ void Estimator::processImage(
     TicToc t_solve;
     solveOdometry();
     ROS_DEBUG("solver costs: %fms", t_solve.toc());
-    ROS_INFO("[EST] solveOdometry cost: %.1fms", t_solve.toc());
+    VINS_LOG("[EST] solveOdometry cost: %.1fms", t_solve.toc());
 
     if (failureDetection()) {
-      ROS_WARN("failure detection!");
+      VINS_WARN("[EST] failure detection! system will reboot!");
       failure_occur = 1;
       clearState();
       setParameter();
-      ROS_WARN("system reboot!");
+      VINS_WARN("[EST] system rebooted!");
       return;
     }
 
@@ -789,27 +790,31 @@ void Estimator::optimization() {
   ROS_DEBUG("Iterations : %d", static_cast<int>(summary.iterations.size()));
   ROS_DEBUG("solver costs: %f", t_solver.toc());
   // === DIAG: Ceres solver summary ===
-  ROS_INFO("[OPT] iterations=%d | solver_time=%.1fms | visual_residuals=%d",
+  VINS_LOG("[OPT] iterations=%d | solver_time=%.1fms | visual_residuals=%d",
            static_cast<int>(summary.iterations.size()), t_solver.toc(),
            f_m_cnt);
-  ROS_INFO("[OPT] initial_cost=%.4f | final_cost=%.4f | cost_change=%.6f",
+  VINS_LOG("[OPT] initial_cost=%.4f | final_cost=%.4f | cost_change=%.6f",
            summary.initial_cost, summary.final_cost,
            summary.initial_cost - summary.final_cost);
 
   double2vector();
 
   // === DIAG: IMU bias and td after optimization ===
-  ROS_INFO("[OPT] Ba=[%.4f, %.4f, %.4f] (norm=%.4f) | Bg=[%.5f, %.5f, %.5f] "
+  VINS_LOG("[OPT] Ba=[%.4f, %.4f, %.4f] (norm=%.4f) | Bg=[%.5f, %.5f, %.5f] "
            "(norm=%.5f)",
            Bas[WINDOW_SIZE].x(), Bas[WINDOW_SIZE].y(), Bas[WINDOW_SIZE].z(),
            Bas[WINDOW_SIZE].norm(), Bgs[WINDOW_SIZE].x(), Bgs[WINDOW_SIZE].y(),
            Bgs[WINDOW_SIZE].z(), Bgs[WINDOW_SIZE].norm());
   if (ESTIMATE_TD)
-    ROS_INFO("[OPT] td=%.4fs", td);
+    VINS_LOG("[OPT] td=%.4fs", td);
   if (ESTIMATE_EXTRINSIC) {
-    ROS_INFO("[OPT] tic=[%.4f, %.4f, %.4f]", tic[0].x(), tic[0].y(),
+    VINS_LOG("[OPT] tic=[%.4f, %.4f, %.4f]", tic[0].x(), tic[0].y(),
              tic[0].z());
   }
+  // 漂移诊断: 每次优化后输出当前位置和速度
+  VINS_LOG("[EST] Pose: P=[%.4f, %.4f, %.4f] | V=[%.4f, %.4f, %.4f]",
+           Ps[WINDOW_SIZE].x(), Ps[WINDOW_SIZE].y(), Ps[WINDOW_SIZE].z(),
+           Vs[WINDOW_SIZE].x(), Vs[WINDOW_SIZE].y(), Vs[WINDOW_SIZE].z());
 
   TicToc t_whole_marginalization;
   if (marginalization_flag == MARGIN_OLD) {
